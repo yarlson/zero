@@ -1,4 +1,4 @@
-module cb
+module github.com/yarlson/zero
 
 go 1.23
 
