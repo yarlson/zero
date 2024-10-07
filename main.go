@@ -12,12 +12,15 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/spf13/pflag"
@@ -38,9 +41,16 @@ type eabCredentials struct {
 	ErrorMessage string `json:"message"`
 }
 
-func fetchZeroSSLCredentials(email string) (kid, hmacKey string, err error) {
+func fetchZeroSSLCredentials(ctx context.Context, email string) (kid, hmacKey string, err error) {
 	data := []byte(fmt.Sprintf("email=%s", email))
-	resp, err := http.Post(zeroSSLEABAPIURL, "application/x-www-form-urlencoded", bytes.NewBuffer(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, zeroSSLEABAPIURL, bytes.NewBuffer(data))
+	if err != nil {
+		return "", "", fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", "", fmt.Errorf("fetch EAB credentials: %w", err)
 	}
@@ -157,8 +167,8 @@ func obtainCertificate(ctx context.Context, client *acme.Client, domain, email, 
 		return fmt.Errorf("get key authorization: %w", err)
 	}
 
-	server := setupHTTPChallenge(token, keyAuth)
-	defer server.Close()
+	serverShutdown := setupHTTPChallenge(token, keyAuth)
+	defer serverShutdown()
 
 	if _, err := client.Accept(ctx, challenge); err != nil {
 		return fmt.Errorf("accept challenge: %w", err)
@@ -195,17 +205,30 @@ func obtainCertificate(ctx context.Context, client *acme.Client, domain, email, 
 	return nil
 }
 
-func setupHTTPChallenge(token, keyAuth string) *http.Server {
-	http.HandleFunc("/.well-known/acme-challenge/"+token, func(w http.ResponseWriter, r *http.Request) {
+func setupHTTPChallenge(token, keyAuth string) func() {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/.well-known/acme-challenge/"+token, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(keyAuth))
 	})
-	server := &http.Server{Addr: ":80"}
+
+	server := &http.Server{
+		Addr:    ":80",
+		Handler: mux,
+	}
+
 	go func() {
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("HTTP server error: %v", err)
 		}
 	}()
-	return server
+
+	return func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.Shutdown(ctx); err != nil {
+			log.Printf("HTTP server shutdown error: %v", err)
+		}
+	}
 }
 
 func determineAction(issue, renew bool) string {
@@ -237,8 +260,8 @@ func shouldObtainCertificate(action string, cert *x509.Certificate) bool {
 	return false
 }
 
-func obtainOrRenewCertificate(domain, email, certFile, keyFile string) error {
-	eabKID, eabHMACKey, err := fetchZeroSSLCredentials(email)
+func obtainOrRenewCertificate(ctx context.Context, domain, email, certFile, keyFile string) error {
+	eabKID, eabHMACKey, err := fetchZeroSSLCredentials(ctx, email)
 	if err != nil {
 		return fmt.Errorf("fetch ZeroSSL credentials: %w", err)
 	}
@@ -252,8 +275,6 @@ func obtainOrRenewCertificate(domain, email, certFile, keyFile string) error {
 		Key:          accountKey,
 		DirectoryURL: zeroSSLURL,
 	}
-
-	ctx := context.Background()
 
 	hmacKey, err := base64.RawURLEncoding.DecodeString(eabHMACKey)
 	if err != nil {
@@ -319,15 +340,31 @@ func main() {
 		log.Printf("Load existing certificate: %v", err)
 	}
 
-	if shouldObtainCertificate(action, cert) {
-		if err := obtainOrRenewCertificate(domain, email, certFile, keyFile); err != nil {
-			log.Fatalf("Obtain/renew certificate: %v", err)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Set up signal handling for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		<-sigChan
+		log.Println("Received interrupt signal. Shutting down...")
+		cancel()
+	}()
+
+	switch {
+	case shouldObtainCertificate(action, cert):
+		if err := obtainOrRenewCertificate(ctx, domain, email, certFile, keyFile); err != nil {
+			if errors.Is(err, context.Canceled) {
+				log.Println("Operation canceled.")
+				return
+			}
+			log.Fatalf("Failed to obtain/renew certificate: %v", err)
 		}
-	} else {
-		if cert == nil {
-			log.Println("No existing certificate to renew.")
-			return
-		}
-		log.Printf("Certificate is valid until %s. No action needed.", cert.NotAfter)
+	case cert == nil:
+		log.Println("No existing certificate found.")
+	default:
+		log.Printf("Certificate is valid until %s. No action needed.", cert.NotAfter.Format(time.RFC3339))
 	}
 }
