@@ -96,6 +96,7 @@ func run(cfg *Config) error {
 	}()
 
 	if certService.ShouldObtainCertificate(action, cert) {
+		log.Printf("Obtaining certificate for %s", cfg.Domain)
 		if err := certService.ObtainOrRenewCertificate(ctx, cfg.Domain, cfg.Email, certFile, keyFile); err != nil {
 			if errors.Is(err, context.Canceled) {
 				return errors.New("operation canceled")

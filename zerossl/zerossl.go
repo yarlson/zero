@@ -163,7 +163,10 @@ func (s *Service) ObtainCertificate(ctx context.Context, domain, email string) (
 		return nil, nil, nil, fmt.Errorf("accept challenge: %w", err)
 	}
 
-	order, err = client.WaitOrder(ctx, order.URI)
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, 1*time.Minute)
+	defer cancel()
+
+	order, err = client.WaitOrder(ctxWithTimeout, order.URI)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("wait for order: %w", err)
 	}
