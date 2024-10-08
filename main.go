@@ -16,20 +16,26 @@ import (
 	"github.com/yarlson/zero/pkg"
 )
 
-func main() {
-	var (
-		domain  string
-		email   string
-		certDir string
-		issue   bool
-		renew   bool
-	)
+const (
+	defaultCertDir = "./certs"
+)
 
-	pflag.StringVarP(&domain, "domain", "d", "", "Domain name for the certificate")
-	pflag.StringVarP(&email, "email", "e", "", "Email address for account registration")
-	pflag.StringVarP(&certDir, "cert-dir", "c", "./certs", "Directory to store certificates")
-	pflag.BoolVarP(&issue, "issue", "i", false, "Issue a new certificate")
-	pflag.BoolVarP(&renew, "renew", "r", false, "Renew the existing certificate")
+type Config struct {
+	Domain  string
+	Email   string
+	CertDir string
+	Issue   bool
+	Renew   bool
+}
+
+func parseFlags() (*Config, error) {
+	cfg := &Config{}
+
+	pflag.StringVarP(&cfg.Domain, "domain", "d", "", "Domain name for the certificate")
+	pflag.StringVarP(&cfg.Email, "email", "e", "", "Email address for account registration")
+	pflag.StringVarP(&cfg.CertDir, "cert-dir", "c", defaultCertDir, "Directory to store certificates")
+	pflag.BoolVarP(&cfg.Issue, "issue", "i", false, "Issue a new certificate")
+	pflag.BoolVarP(&cfg.Renew, "renew", "r", false, "Renew the existing certificate")
 
 	pflag.Usage = func() {
 		_, _ = fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
@@ -40,22 +46,36 @@ func main() {
 
 	pflag.Parse()
 
-	if domain == "" || email == "" {
-		fmt.Println("Error: Domain and email are required.")
-		pflag.Usage()
-		os.Exit(1)
+	if cfg.Domain == "" || cfg.Email == "" {
+		return nil, errors.New("domain and email are required")
 	}
 
-	if err := os.MkdirAll(certDir, 0700); err != nil {
-		log.Fatalf("Create cert directory: %v", err)
+	if cfg.Issue && cfg.Renew {
+		return nil, errors.New("cannot specify both --issue and --renew")
 	}
 
-	certFile := filepath.Join(certDir, domain+".crt")
-	keyFile := filepath.Join(certDir, domain+".key")
+	return cfg, nil
+}
 
-	action := pkg.DetermineAction(issue, renew)
+func run(cfg *Config) error {
+	if err := os.MkdirAll(cfg.CertDir, 0700); err != nil {
+		return fmt.Errorf("create cert directory: %w", err)
+	}
 
-	cert, err := pkg.LoadCertificate(certFile)
+	certFile := filepath.Join(cfg.CertDir, cfg.Domain+".crt")
+	keyFile := filepath.Join(cfg.CertDir, cfg.Domain+".key")
+
+	action := "auto"
+	if cfg.Issue {
+		action = "issue"
+	} else if cfg.Renew {
+		action = "renew"
+	}
+
+	zeroSSLService := pkg.NewZeroSSLService()
+	certService := pkg.NewCertificateService(zeroSSLService)
+
+	cert, err := certService.LoadCertificate(certFile)
 	if err != nil && action != "issue" {
 		log.Printf("Load existing certificate: %v", err)
 	}
@@ -73,18 +93,29 @@ func main() {
 		cancel()
 	}()
 
-	switch {
-	case pkg.ShouldObtainCertificate(action, cert):
-		if err := pkg.ObtainOrRenewCertificate(ctx, domain, email, certFile, keyFile); err != nil {
+	if certService.ShouldObtainCertificate(action, cert) {
+		if err := certService.ObtainOrRenewCertificate(ctx, cfg.Domain, cfg.Email, certFile, keyFile); err != nil {
 			if errors.Is(err, context.Canceled) {
-				log.Println("Operation canceled.")
-				return
+				return errors.New("operation canceled")
 			}
-			log.Fatalf("Failed to obtain/renew certificate: %v", err)
+			return fmt.Errorf("failed to obtain/renew certificate: %w", err)
 		}
-	case cert == nil:
+	} else if cert == nil {
 		log.Println("No existing certificate found.")
-	default:
+	} else {
 		log.Printf("Certificate is valid until %s. No action needed.", cert.NotAfter.Format(time.RFC3339))
+	}
+
+	return nil
+}
+
+func main() {
+	cfg, err := parseFlags()
+	if err != nil {
+		log.Fatalf("Error parsing flags: %v", err)
+	}
+
+	if err := run(cfg); err != nil {
+		log.Fatalf("Error: %v", err)
 	}
 }
