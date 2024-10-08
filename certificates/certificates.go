@@ -1,4 +1,4 @@
-package pkg
+package certificates
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"golang.org/x/crypto/acme"
 	"log"
 	"os"
 	"time"
@@ -15,17 +16,21 @@ const (
 	renewBeforeDays = 30
 )
 
-type CertificateService struct {
-	zeroSSLService *ZeroSSLService
+type ZeroSSLService interface {
+	ObtainCertificate(ctx context.Context, domain, email string) (*acme.Client, [][]byte, crypto.PrivateKey, error)
 }
 
-func NewCertificateService(zeroSSLService *ZeroSSLService) *CertificateService {
-	return &CertificateService{
+type Service struct {
+	zeroSSLService ZeroSSLService
+}
+
+func New(zeroSSLService ZeroSSLService) *Service {
+	return &Service{
 		zeroSSLService: zeroSSLService,
 	}
 }
 
-func (s *CertificateService) saveCertificate(filename string, certBytes [][]byte) error {
+func (s *Service) saveCertificate(filename string, certBytes [][]byte) error {
 	file, err := os.Create(filename)
 	if err != nil {
 		return fmt.Errorf("create certificate file: %w", err)
@@ -40,7 +45,7 @@ func (s *CertificateService) saveCertificate(filename string, certBytes [][]byte
 	return nil
 }
 
-func (s *CertificateService) savePrivateKey(filename string, privateKey crypto.PrivateKey) error {
+func (s *Service) savePrivateKey(filename string, privateKey crypto.PrivateKey) error {
 	file, err := os.Create(filename)
 	if err != nil {
 		return fmt.Errorf("create private key file: %w", err)
@@ -54,7 +59,7 @@ func (s *CertificateService) savePrivateKey(filename string, privateKey crypto.P
 	return pem.Encode(file, &pem.Block{Type: "PRIVATE KEY", Bytes: privateKeyBytes})
 }
 
-func (s *CertificateService) LoadCertificate(filename string) (*x509.Certificate, error) {
+func (s *Service) LoadCertificate(filename string) (*x509.Certificate, error) {
 	data, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, fmt.Errorf("read certificate file: %w", err)
@@ -73,11 +78,11 @@ func (s *CertificateService) LoadCertificate(filename string) (*x509.Certificate
 	return nil, fmt.Errorf("no certificate found in %s", filename)
 }
 
-func (s *CertificateService) certificateNeedsRenewal(cert *x509.Certificate) bool {
+func (s *Service) certificateNeedsRenewal(cert *x509.Certificate) bool {
 	return time.Now().Add(renewBeforeDays * 24 * time.Hour).After(cert.NotAfter)
 }
 
-func (s *CertificateService) ShouldObtainCertificate(action string, cert *x509.Certificate) bool {
+func (s *Service) ShouldObtainCertificate(action string, cert *x509.Certificate) bool {
 	switch action {
 	case "issue":
 		return true
@@ -92,7 +97,7 @@ func (s *CertificateService) ShouldObtainCertificate(action string, cert *x509.C
 	return false
 }
 
-func (s *CertificateService) ObtainOrRenewCertificate(ctx context.Context, domain, email, certFile, keyFile string) error {
+func (s *Service) ObtainOrRenewCertificate(ctx context.Context, domain, email, certFile, keyFile string) error {
 	_, certs, privateKey, err := s.zeroSSLService.ObtainCertificate(ctx, domain, email)
 	if err != nil {
 		return fmt.Errorf("obtain certificate: %w", err)

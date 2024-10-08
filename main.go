@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
 	"log"
 	"os"
 	"os/signal"
@@ -13,7 +14,8 @@ import (
 
 	"github.com/spf13/pflag"
 
-	"github.com/yarlson/zero/pkg"
+	"github.com/yarlson/zero/certificates"
+	"github.com/yarlson/zero/zerossl"
 )
 
 const (
@@ -72,8 +74,8 @@ func run(cfg *Config) error {
 		action = "renew"
 	}
 
-	zeroSSLService := pkg.NewZeroSSLService()
-	certService := pkg.NewCertificateService(zeroSSLService)
+	zeroSSLService := zerossl.New()
+	certService := certificates.New(zeroSSLService)
 
 	cert, err := certService.LoadCertificate(certFile)
 	if err != nil && action != "issue" {
