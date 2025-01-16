@@ -159,17 +159,21 @@ func (s *Service) ObtainCertificate(ctx context.Context, domain, email string) (
 	serverShutdown := setupHTTPChallenge(token, keyAuth)
 	defer serverShutdown()
 
+	log.Printf("Starting HTTP-01 challenge verification...")
 	if _, err := client.Accept(ctx, challenge); err != nil {
 		return nil, nil, nil, fmt.Errorf("accept challenge: %w", err)
 	}
+	log.Printf("Challenge accepted, waiting for verification (timeout: 10 minutes)...")
 
-	ctxWithTimeout, cancel := context.WithTimeout(ctx, 1*time.Minute)
+	log.Printf("Waiting for order verification (timeout: 10 minutes)...")
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
 	order, err = client.WaitOrder(ctxWithTimeout, order.URI)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("wait for order: %w", err)
 	}
+	log.Printf("Order verified successfully")
 
 	csrTemplate := &x509.CertificateRequest{
 		Subject:  pkix.Name{CommonName: domain},
