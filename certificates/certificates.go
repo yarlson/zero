@@ -6,10 +6,11 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
-	"golang.org/x/crypto/acme"
 	"log"
 	"os"
 	"time"
+
+	"golang.org/x/crypto/acme"
 )
 
 const (
