@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+package cluster;
+
+option go_package = "github.com/yarlson/zero/cluster/proto;cluster";
+
+service ClusterService {
+  rpc SyncChallenge (Challenge) returns (ChallengeResponse) {}
+  rpc SyncCertificate (Certificate) returns (CertificateResponse) {}
+  rpc HealthCheck (HealthCheckRequest) returns (HealthCheckResponse) {}
+}
+
+message Challenge {
+  string token = 1;
+  string key_auth = 2;
+  int64 expires_at = 3;
+}
+
+message ChallengeResponse {
+  bool success = 1;
+  string error = 2;
+}
+
+message Certificate {
+  string domain = 1;
+  bytes certificate = 2;
+  bytes private_key = 3;
+  int64 updated_at = 4;
+}
+
+message CertificateResponse {
+  bool success = 1;
+  string error = 2;
+}
+
+message HealthCheckRequest {
+  string instance_id = 1;
+}
+
+message HealthCheckResponse {
+  bool healthy = 1;
+  string status = 2;
+}

@@ -1,75 +1,124 @@
-# Zero - Go ACME Client for ZeroSSL
+# Zero SSL Certificate Manager
 
-## Problem
-
-Nginx servers need SSL/TLS certificates for secure connections. Existing solutions like Certbot are often too large and complex for simple setups.
-
-## Solution
-
-Zero is a lightweight Go ACME client for obtaining and renewing SSL/TLS certificates from ZeroSSL using the ACME protocol.
+A Go-based CLI tool for automated SSL certificate management using ZeroSSL's ACME service, with support for clustered deployments.
 
 ## Features
 
-- Obtains and renews SSL/TLS certificates from ZeroSSL
-- Supports HTTP-01 challenge
-- Automatic renewal before expiration
-- Minimal dependencies
-- Automatic retrieval of ZeroSSL credentials using email
-- Configurable certificate storage directory
-- POSIX-compatible command-line interface
-
-## Requirements
-
-- Go 1.16 or later
+- Automated SSL certificate issuance and renewal
+- HTTP-01 challenge verification
+- Cluster support for distributed certificate management
+- Cron mode for automated renewals
+- Configurable certificate storage location
+- Graceful shutdown handling
 
 ## Installation
 
-```
+```bash
 go install github.com/yarlson/zero@latest
 ```
 
 ## Usage
 
-```
-zero -d example.com -e user@example.com [-c /path/to/certs] [-i] [-r]
-```
+Basic certificate issuance:
 
-or using long-form flags:
-
-```
-zero --domain example.com --email user@example.com [--cert-dir /path/to/certs] [--issue] [--renew]
+```bash
+zero -d example.com -e user@example.com --issue
 ```
 
-Options:
+Certificate renewal:
 
-- `-d, --domain`: Domain name for the certificate (required)
-- `-e, --email`: Email address for credential retrieval and account registration (required)
-- `-c, --cert-dir`: Directory to store certificates (default: "./certs")
-- `-i, --issue`: Force issuance of a new certificate
-- `-r, --renew`: Force renewal of an existing certificate
-
-Without `--issue` or `--renew`, Zero checks the existing certificate and renews if needed.
-
-For more information, run:
-
+```bash
+zero -d example.com -e user@example.com --renew
 ```
-zero --help
+
+Automated mode (issues if missing, renews if expiring):
+
+```bash
+zero -d example.com -e user@example.com
+```
+
+### Cron Mode
+
+Run with daily renewal checks:
+
+```bash
+zero -d example.com -e user@example.com --cron --time "02:00"
+```
+
+### Cluster Mode
+
+Run in cluster mode:
+
+```bash
+# First node
+zero -d example.com -e user@example.com --cluster --cluster-addr "localhost:5000"
+
+# Additional nodes
+zero -d example.com -e user@example.com --cluster \
+  --cluster-addr "localhost:5001" \
+  --seed-nodes "localhost:5000"
 ```
 
 ## Configuration
 
-Certificates are stored in the `./certs` directory by default. Use the `--cert-dir` flag to specify a custom directory for certificate storage.
+Command line options:
 
-## Limitations
+```
+  -d, --domain string         Domain name for the certificate
+  -e, --email string         Email address for account registration
+  -c, --cert-dir string      Directory to store certificates (default "./certs")
+  -i, --issue                Issue a new certificate
+  -r, --renew                Renew the existing certificate
+      --cron                 Run in cron mode for daily renewals
+      --time string          Time for daily renewal in HH:mm format (default "02:00")
+      --cluster             Enable cluster mode
+      --cluster-addr string  Address for cluster communication (default "localhost:5000")
+      --seed-nodes strings   List of seed nodes to join cluster
+```
 
-- Only supports HTTP-01 challenge
-- Designed for single-domain certificates
-- No support for wildcard certificates
+## Cluster Architecture
 
-## Contributing
+The cluster mode provides:
 
-Contributions are welcome. Please submit pull requests with clear descriptions of changes and updates to tests if applicable.
+- Distributed certificate storage
+- Leader election for coordinated operations
+- Automatic node health monitoring
+- gRPC-based inter-node communication
+- Certificate and challenge synchronization
+
+### Cluster Configuration
+
+```go
+type Config struct {
+    InstanceID   string        // Unique identifier for this instance
+    BindAddress  string        // Address for cluster communication
+    SeedNodes    []string      // List of seed nodes to join cluster
+    TLSConfig    *tls.Config   // Optional TLS configuration
+    StateDir     string        // Directory for cluster state
+}
+```
+
+## Development
+
+Requirements:
+
+- Go 1.23 or later
+- Protocol Buffers compiler (protoc)
+- Make
+
+Building:
+
+```bash
+# Install dependencies
+make deps
+
+# Generate protobuf code
+make proto
+
+# Build
+go build
+```
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+[License details here]

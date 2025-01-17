@@ -11,6 +11,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -30,12 +31,6 @@ type Service struct {
 }
 
 type Option func(*Service)
-
-func WithClient(client *http.Client) Option {
-	return func(s *Service) {
-		s.client = client
-	}
-}
 
 func New(options ...Option) *Service {
 	service := &Service{
@@ -61,7 +56,7 @@ func (s *Service) FetchCredentials(ctx context.Context, email string) (kid, hmac
 	if err != nil {
 		return "", "", fmt.Errorf("fetch EAB credentials: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -204,7 +199,7 @@ func setupHTTPChallenge(token, keyAuth string) func() {
 	}
 
 	go func() {
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("HTTP server error: %v", err)
 		}
 	}()

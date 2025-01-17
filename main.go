@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/yarlson/zero/certificates"
+	"github.com/yarlson/zero/cluster"
 	"github.com/yarlson/zero/zerossl"
 )
 
@@ -22,13 +23,16 @@ const (
 )
 
 type Config struct {
-	Domain  string
-	Email   string
-	CertDir string
-	Issue   bool
-	Renew   bool
-	Cron    bool
-	Time    string
+	Domain      string
+	Email       string
+	CertDir     string
+	Issue       bool
+	Renew       bool
+	Cron        bool
+	Time        string
+	Cluster     bool
+	ClusterAddr string
+	SeedNodes   []string
 }
 
 func parseFlags() (*Config, error) {
@@ -41,6 +45,9 @@ func parseFlags() (*Config, error) {
 	pflag.BoolVarP(&cfg.Renew, "renew", "r", false, "Renew the existing certificate")
 	pflag.BoolVar(&cfg.Cron, "cron", false, "Run in cron mode for daily renewals")
 	pflag.StringVar(&cfg.Time, "time", "02:00", "Time for daily renewal in HH:mm format (24-hour or 12-hour with AM/PM)")
+	pflag.BoolVar(&cfg.Cluster, "cluster", false, "Enable cluster mode")
+	pflag.StringVar(&cfg.ClusterAddr, "cluster-addr", "localhost:5000", "Address for cluster communication")
+	pflag.StringSliceVar(&cfg.SeedNodes, "seed-nodes", nil, "List of seed nodes to join cluster")
 
 	pflag.Usage = func() {
 		_, _ = fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
@@ -86,6 +93,28 @@ func parseTime(timeStr string) (time.Time, error) {
 }
 
 func run(cfg *Config) error {
+	var clusterMgr *cluster.Manager
+
+	if cfg.Cluster {
+		clusterCfg := &cluster.Config{
+			InstanceID:  cluster.GenerateInstanceID(),
+			BindAddress: cfg.ClusterAddr,
+			SeedNodes:   cfg.SeedNodes,
+			StateDir:    cfg.CertDir,
+		}
+
+		var err error
+		clusterMgr, err = cluster.NewManager(clusterCfg)
+		if err != nil {
+			return fmt.Errorf("initialize cluster manager: %w", err)
+		}
+
+		if err := clusterMgr.Start(context.Background()); err != nil {
+			return fmt.Errorf("start cluster manager: %w", err)
+		}
+		defer func() { _ = clusterMgr.Stop() }()
+	}
+
 	if err := os.MkdirAll(cfg.CertDir, 0700); err != nil {
 		return fmt.Errorf("create cert directory: %w", err)
 	}
