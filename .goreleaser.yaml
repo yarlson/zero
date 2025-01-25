@@ -3,8 +3,9 @@ version: 2
 project_name: zero
 
 builds:
-  - id: zero
-    main: ./main.go
+  - env:
+      - CGO_ENABLED=0
+    binary: zero
     goos:
       - linux
       - darwin
@@ -14,8 +15,6 @@ builds:
       - arm64
     ldflags:
       - -s -w -X main.version={{.Version}}
-    env:
-      - CGO_ENABLED=0
 
 archives:
   - id: release_archive
@@ -23,6 +22,33 @@ archives:
     files:
       - LICENSE
       - README.md
+
+dockers:
+  - image_templates:
+      - "yarlson/zero:{{ .Version }}-amd64"
+      - "yarlson/zero:latest-amd64"
+    dockerfile: Dockerfile
+    build_flag_templates:
+      - "--platform=linux/amd64"
+
+  - image_templates:
+      - "yarlson/zero:{{ .Version }}-arm64"
+      - "yarlson/zero:latest-arm64"
+    goarch: arm64
+    dockerfile: Dockerfile
+    build_flag_templates:
+      - "--platform=linux/arm64"
+
+docker_manifests:
+  - name_template: "yarlson/zero:{{ .Version }}"
+    image_templates:
+      - "yarlson/zero:{{ .Version }}-amd64"
+      - "yarlson/zero:{{ .Version }}-arm64"
+
+  - name_template: "yarlson/zero:latest"
+    image_templates:
+      - "yarlson/zero:latest-amd64"
+      - "yarlson/zero:latest-arm64"
 
 release:
   github:
