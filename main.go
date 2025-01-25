@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/yarlson/zero/certificates"
+	"github.com/yarlson/zero/cron"
 	"github.com/yarlson/zero/zerossl"
 )
 
@@ -60,29 +61,12 @@ func parseFlags() (*Config, error) {
 	}
 
 	if cfg.Cron {
-		if _, err := parseTime(cfg.Time); err != nil {
+		if _, err := cron.ParseTime(cfg.Time); err != nil {
 			return nil, fmt.Errorf("invalid time format: %w", err)
 		}
 	}
 
 	return cfg, nil
-}
-
-func parseTime(timeStr string) (time.Time, error) {
-	formats := []string{
-		"15:04",
-		"3:04PM",
-		"3:04 PM",
-	}
-
-	for _, format := range formats {
-		t, err := time.Parse(format, timeStr)
-		if err == nil {
-			return t, nil
-		}
-	}
-
-	return time.Time{}, fmt.Errorf("unable to parse time: %s", timeStr)
 }
 
 func run(cfg *Config) error {
@@ -137,43 +121,12 @@ func run(cfg *Config) error {
 	return nil
 }
 
-func runCron(cfg *Config) error {
-	renewalTime, err := parseTime(cfg.Time)
-	if err != nil {
-		return fmt.Errorf("parse renewal time: %w", err)
-	}
-
-	log.Printf("Starting cron mode. Daily renewal scheduled at %s", renewalTime.Format("15:04"))
-
-	ticker := time.NewTicker(getNextTickDuration(renewalTime))
-	defer ticker.Stop()
-
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-	for {
-		select {
-		case <-ticker.C:
-			log.Println("Running scheduled renewal")
-			if err := run(cfg); err != nil {
-				log.Printf("Error during scheduled renewal: %v", err)
-			}
-			ticker.Reset(24 * time.Hour)
-		case <-sigChan:
-			log.Println("Received interrupt signal. Shutting down...")
-			return nil
-		}
-	}
+type certRunner struct {
+	config *Config
 }
 
-func getNextTickDuration(t time.Time) time.Duration {
-	now := time.Now()
-	next := time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), 0, 0, now.Location())
-	if next.Before(now) {
-		next = next.Add(24 * time.Hour)
-	}
-
-	return next.Sub(now)
+func (r *certRunner) Run() error {
+	return run(r.config)
 }
 
 func main() {
@@ -183,7 +136,9 @@ func main() {
 	}
 
 	if cfg.Cron {
-		if err := runCron(cfg); err != nil {
+		runner := &certRunner{config: cfg}
+		cronService := cron.New(runner, cfg.Time)
+		if err := cronService.Start(); err != nil {
 			log.Fatalf("Error in cron mode: %v", err)
 		}
 		return
