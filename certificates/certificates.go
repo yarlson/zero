@@ -5,12 +5,13 @@ import (
 	"crypto"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"sync"
 	"time"
-
-	"golang.org/x/crypto/acme"
 )
 
 const (
@@ -18,16 +19,19 @@ const (
 )
 
 type ZeroSSLService interface {
-	ObtainCertificate(ctx context.Context, domain, email string) (*acme.Client, [][]byte, crypto.PrivateKey, error)
+	ObtainCertificate(ctx context.Context, domain, email string, challengeHandler func(token, response string)) ([][]byte, crypto.PrivateKey, error)
 }
 
 type Service struct {
 	zeroSSLService ZeroSSLService
+	challenges     map[string]string
+	challengeMu    sync.RWMutex
 }
 
 func New(zeroSSLService ZeroSSLService) *Service {
 	return &Service{
 		zeroSSLService: zeroSSLService,
+		challenges:     make(map[string]string),
 	}
 }
 
@@ -79,27 +83,12 @@ func (s *Service) LoadCertificate(filename string) (*x509.Certificate, error) {
 	return nil, fmt.Errorf("no certificate found in %s", filename)
 }
 
-func (s *Service) certificateNeedsRenewal(cert *x509.Certificate) bool {
+func (s *Service) CertificateNeedsRenewal(cert *x509.Certificate) bool {
 	return time.Now().Add(renewBeforeDays * 24 * time.Hour).After(cert.NotAfter)
 }
 
-func (s *Service) ShouldObtainCertificate(action string, cert *x509.Certificate) bool {
-	switch action {
-	case "issue":
-		return true
-	case "renew":
-		if cert == nil {
-			log.Fatal("No existing certificate to renew.")
-		}
-		return true
-	case "auto":
-		return cert == nil || s.certificateNeedsRenewal(cert)
-	}
-	return false
-}
-
 func (s *Service) ObtainOrRenewCertificate(ctx context.Context, domain, email, certFile, keyFile string) error {
-	_, certs, privateKey, err := s.zeroSSLService.ObtainCertificate(ctx, domain, email)
+	certs, privateKey, err := s.zeroSSLService.ObtainCertificate(ctx, domain, email, s.StoreChallenge)
 	if err != nil {
 		return fmt.Errorf("obtain certificate: %w", err)
 	}
@@ -113,5 +102,42 @@ func (s *Service) ObtainOrRenewCertificate(ctx context.Context, domain, email, c
 
 	log.Printf("Certificate saved to: %s", certFile)
 	log.Printf("Private key saved to: %s", keyFile)
+	return nil
+}
+
+func (s *Service) StoreChallenge(token, response string) {
+	s.challengeMu.Lock()
+	defer s.challengeMu.Unlock()
+	s.challenges[token] = response
+}
+
+func (s *Service) GetChallengeResponse(token string) (string, bool) {
+	s.challengeMu.RLock()
+	defer s.challengeMu.RUnlock()
+	response, exists := s.challenges[token]
+	return response, exists
+}
+
+func (s *Service) CheckCertificate(ctx context.Context, domain, email, certDir string) error {
+	certFile := filepath.Join(certDir, domain+".crt")
+	keyFile := filepath.Join(certDir, domain+".key")
+
+	cert, err := s.LoadCertificate(certFile)
+	if err != nil {
+		log.Printf("Load existing certificate: %v", err)
+	}
+
+	if cert == nil || s.CertificateNeedsRenewal(cert) {
+		log.Printf("Obtaining certificate for %s", domain)
+		if err := s.ObtainOrRenewCertificate(ctx, domain, email, certFile, keyFile); err != nil {
+			if errors.Is(err, context.Canceled) {
+				return errors.New("operation canceled")
+			}
+			return fmt.Errorf("failed to obtain/renew certificate: %w", err)
+		}
+	} else {
+		log.Printf("Certificate is valid until %s. No action needed.", cert.NotAfter.Format(time.RFC3339))
+	}
+
 	return nil
 }

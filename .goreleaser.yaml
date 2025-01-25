@@ -16,7 +16,7 @@ builds:
       - -s -w -X main.version={{.Version}}
     env:
       - CGO_ENABLED=0
-      
+
 archives:
   - id: release_archive
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"

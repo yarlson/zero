@@ -7,7 +7,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -15,21 +14,22 @@ import (
 
 	"github.com/yarlson/zero/certificates"
 	"github.com/yarlson/zero/cron"
+	"github.com/yarlson/zero/server"
 	"github.com/yarlson/zero/zerossl"
 )
 
 const (
 	defaultCertDir = "./certs"
+	defaultPort    = 80
+	defaultTime    = "02:00"
 )
 
 type Config struct {
 	Domain  string
 	Email   string
 	CertDir string
-	Issue   bool
-	Renew   bool
-	Cron    bool
 	Time    string
+	Port    int
 }
 
 func parseFlags() (*Config, error) {
@@ -38,14 +38,12 @@ func parseFlags() (*Config, error) {
 	pflag.StringVarP(&cfg.Domain, "domain", "d", "", "Domain name for the certificate")
 	pflag.StringVarP(&cfg.Email, "email", "e", "", "Email address for account registration")
 	pflag.StringVarP(&cfg.CertDir, "cert-dir", "c", defaultCertDir, "Directory to store certificates")
-	pflag.BoolVarP(&cfg.Issue, "issue", "i", false, "Issue a new certificate")
-	pflag.BoolVarP(&cfg.Renew, "renew", "r", false, "Renew the existing certificate")
-	pflag.BoolVar(&cfg.Cron, "cron", false, "Run in cron mode for daily renewals")
-	pflag.StringVar(&cfg.Time, "time", "02:00", "Time for daily renewal in HH:mm format (24-hour or 12-hour with AM/PM)")
+	pflag.StringVarP(&cfg.Time, "time", "t", defaultTime, "Time for daily renewal in HH:mm format")
+	pflag.IntVarP(&cfg.Port, "port", "p", defaultPort, "HTTP port for ACME challenges")
 
 	pflag.Usage = func() {
 		_, _ = fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
-		_, _ = fmt.Fprintf(os.Stderr, "  %s -d example.com -e user@example.com [-c /path/to/certs] [-i] [-r] [--cron] [--time HH:mm]\n\n", os.Args[0])
+		_, _ = fmt.Fprintf(os.Stderr, "  %s -d example.com -e user@example.com [-c /path/to/certs] [--time HH:mm] [-p port]\n\n", os.Args[0])
 		_, _ = fmt.Fprintf(os.Stderr, "Options:\n")
 		pflag.PrintDefaults()
 	}
@@ -56,77 +54,11 @@ func parseFlags() (*Config, error) {
 		return nil, errors.New("domain and email are required")
 	}
 
-	if cfg.Issue && cfg.Renew {
-		return nil, errors.New("cannot specify both --issue and --renew")
-	}
-
-	if cfg.Cron {
-		if _, err := cron.ParseTime(cfg.Time); err != nil {
-			return nil, fmt.Errorf("invalid time format: %w", err)
-		}
+	if _, err := cron.ParseTime(cfg.Time); err != nil {
+		return nil, fmt.Errorf("invalid time format: %w", err)
 	}
 
 	return cfg, nil
-}
-
-func run(cfg *Config) error {
-	if err := os.MkdirAll(cfg.CertDir, 0700); err != nil {
-		return fmt.Errorf("create cert directory: %w", err)
-	}
-
-	certFile := filepath.Join(cfg.CertDir, cfg.Domain+".crt")
-	keyFile := filepath.Join(cfg.CertDir, cfg.Domain+".key")
-
-	action := "auto"
-	if cfg.Issue {
-		action = "issue"
-	} else if cfg.Renew {
-		action = "renew"
-	}
-
-	zeroSSLService := zerossl.New()
-	certService := certificates.New(zeroSSLService)
-
-	cert, err := certService.LoadCertificate(certFile)
-	if err != nil && action != "issue" {
-		log.Printf("Load existing certificate: %v", err)
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-	go func() {
-		<-sigChan
-		log.Println("Received interrupt signal. Shutting down...")
-		cancel()
-	}()
-
-	if certService.ShouldObtainCertificate(action, cert) {
-		log.Printf("Obtaining certificate for %s", cfg.Domain)
-		if err := certService.ObtainOrRenewCertificate(ctx, cfg.Domain, cfg.Email, certFile, keyFile); err != nil {
-			if errors.Is(err, context.Canceled) {
-				return errors.New("operation canceled")
-			}
-			return fmt.Errorf("failed to obtain/renew certificate: %w", err)
-		}
-	} else if cert == nil {
-		log.Println("No existing certificate found.")
-	} else {
-		log.Printf("Certificate is valid until %s. No action needed.", cert.NotAfter.Format(time.RFC3339))
-	}
-
-	return nil
-}
-
-type certRunner struct {
-	config *Config
-}
-
-func (r *certRunner) Run() error {
-	return run(r.config)
 }
 
 func main() {
@@ -135,16 +67,36 @@ func main() {
 		log.Fatalf("Error parsing flags: %v", err)
 	}
 
-	if cfg.Cron {
-		runner := &certRunner{config: cfg}
-		cronService := cron.New(runner, cfg.Time)
-		if err := cronService.Start(); err != nil {
-			log.Fatalf("Error in cron mode: %v", err)
-		}
-		return
+	if err := os.MkdirAll(cfg.CertDir, 0700); err != nil {
+		log.Fatalf("Create cert directory: %v", err)
 	}
 
-	if err := run(cfg); err != nil {
-		log.Fatalf("Error: %v", err)
+	// Setup services
+	zeroSSLService := zerossl.New()
+	certService := certificates.New(zeroSSLService)
+
+	// Start HTTP server
+	srv := server.New(certService, cfg.Port)
+	go func() {
+		if err := srv.Start(); err != nil {
+			log.Fatalf("HTTP server error: %v", err)
+		}
+	}()
+
+	// Start certificate checker
+	checkCert := func(ctx context.Context) error {
+		return certService.CheckCertificate(ctx, cfg.Domain, cfg.Email, cfg.CertDir)
 	}
+
+	cronService := cron.New(checkCert, cfg.Time)
+	go cronService.Start()
+
+	// Wait for shutdown signal
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	<-sigChan
+
+	log.Println("Shutting down...")
+	cronService.Stop()
+	time.Sleep(time.Second)
 }

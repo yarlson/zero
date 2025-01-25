@@ -87,15 +87,15 @@ func (s *Service) FetchCredentials(ctx context.Context, email string) (kid, hmac
 	return result.EABKID, result.EABHMACKey, nil
 }
 
-func (s *Service) ObtainCertificate(ctx context.Context, domain, email string) (*acme.Client, [][]byte, crypto.PrivateKey, error) {
+func (s *Service) ObtainCertificate(ctx context.Context, domain, email string, challengeHandler func(token, response string)) ([][]byte, crypto.PrivateKey, error) {
 	eabKID, eabHMACKey, err := s.FetchCredentials(ctx, email)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("fetch ZeroSSL credentials: %w", err)
+		return nil, nil, fmt.Errorf("fetch ZeroSSL credentials: %w", err)
 	}
 
 	accountKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("generate account private key: %w", err)
+		return nil, nil, fmt.Errorf("generate account private key: %w", err)
 	}
 
 	client := &acme.Client{
@@ -105,7 +105,7 @@ func (s *Service) ObtainCertificate(ctx context.Context, domain, email string) (
 
 	hmacKey, err := base64.RawURLEncoding.DecodeString(eabHMACKey)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("decode EAB HMAC key: %w", err)
+		return nil, nil, fmt.Errorf("decode EAB HMAC key: %w", err)
 	}
 
 	account := &acme.Account{
@@ -117,24 +117,24 @@ func (s *Service) ObtainCertificate(ctx context.Context, domain, email string) (
 	}
 	_, err = client.Register(ctx, account, acme.AcceptTOS)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("create account: %w", err)
+		return nil, nil, fmt.Errorf("create account: %w", err)
 	}
 
 	certPrivateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("generate certificate private key: %w", err)
+		return nil, nil, fmt.Errorf("generate certificate private key: %w", err)
 	}
 
 	order, err := client.AuthorizeOrder(ctx, []acme.AuthzID{{Type: "dns", Value: domain}})
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("create order: %w", err)
+		return nil, nil, fmt.Errorf("create order: %w", err)
 	}
 
 	var challenge *acme.Challenge
 	for _, authzURL := range order.AuthzURLs {
 		auth, err := client.GetAuthorization(ctx, authzURL)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("get authorization: %w", err)
+			return nil, nil, fmt.Errorf("get authorization: %w", err)
 		}
 		for _, c := range auth.Challenges {
 			if c.Type == "http-01" {
@@ -147,21 +147,20 @@ func (s *Service) ObtainCertificate(ctx context.Context, domain, email string) (
 		}
 	}
 	if challenge == nil {
-		return nil, nil, nil, fmt.Errorf("no HTTP-01 challenge found")
+		return nil, nil, fmt.Errorf("no HTTP-01 challenge found")
 	}
 
 	token := challenge.Token
 	keyAuth, err := client.HTTP01ChallengeResponse(challenge.Token)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("get key authorization: %w", err)
+		return nil, nil, fmt.Errorf("get key authorization: %w", err)
 	}
 
-	serverShutdown := setupHTTPChallenge(token, keyAuth)
-	defer serverShutdown()
+	challengeHandler(token, keyAuth)
 
 	log.Printf("Starting HTTP-01 challenge verification...")
 	if _, err := client.Accept(ctx, challenge); err != nil {
-		return nil, nil, nil, fmt.Errorf("accept challenge: %w", err)
+		return nil, nil, fmt.Errorf("accept challenge: %w", err)
 	}
 	log.Printf("Challenge accepted, waiting for verification (timeout: 10 minutes)...")
 
@@ -171,7 +170,7 @@ func (s *Service) ObtainCertificate(ctx context.Context, domain, email string) (
 
 	order, err = client.WaitOrder(ctxWithTimeout, order.URI)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("wait for order: %w", err)
+		return nil, nil, fmt.Errorf("wait for order: %w", err)
 	}
 	log.Printf("Order verified successfully")
 
@@ -181,39 +180,13 @@ func (s *Service) ObtainCertificate(ctx context.Context, domain, email string) (
 	}
 	csrDER, err := x509.CreateCertificateRequest(rand.Reader, csrTemplate, certPrivateKey)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("create CSR: %w", err)
+		return nil, nil, fmt.Errorf("create CSR: %w", err)
 	}
 
 	certs, _, err := client.CreateOrderCert(ctx, order.FinalizeURL, csrDER, true)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("create order certificate: %w", err)
+		return nil, nil, fmt.Errorf("create order certificate: %w", err)
 	}
 
-	return client, certs, certPrivateKey, nil
-}
-
-func setupHTTPChallenge(token, keyAuth string) func() {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/.well-known/acme-challenge/"+token, func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(keyAuth))
-	})
-
-	server := &http.Server{
-		Addr:    ":80",
-		Handler: mux,
-	}
-
-	go func() {
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("HTTP server error: %v", err)
-		}
-	}()
-
-	return func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := server.Shutdown(ctx); err != nil {
-			log.Printf("HTTP server shutdown error: %v", err)
-		}
-	}
+	return certs, certPrivateKey, nil
 }

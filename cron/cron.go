@@ -1,11 +1,9 @@
 package cron
 
 import (
+	"context"
 	"fmt"
 	"log"
-	"os"
-	"os/signal"
-	"syscall"
 	"time"
 )
 
@@ -16,46 +14,58 @@ type Runner interface {
 
 // Service handles the scheduling and execution of periodic tasks
 type Service struct {
-	runner Runner
+	task   func(context.Context) error
 	time   string
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // New creates a new cron Service
-func New(runner Runner, time string) *Service {
+func New(task func(context.Context) error, time string) *Service {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Service{
-		runner: runner,
+		task:   task,
 		time:   time,
+		ctx:    ctx,
+		cancel: cancel,
 	}
 }
 
 // Start begins the cron service
-func (s *Service) Start() error {
+func (s *Service) Start() {
 	renewalTime, err := ParseTime(s.time)
 	if err != nil {
-		return fmt.Errorf("parse renewal time: %w", err)
+		log.Fatalf("Invalid time format: %v", err)
 	}
 
-	log.Printf("Starting cron mode. Daily renewal scheduled at %s", renewalTime.Format("15:04"))
+	log.Printf("Starting service. Daily task scheduled at %s", renewalTime.Format("15:04"))
 
+	// Initial run
+	if err := s.task(s.ctx); err != nil {
+		log.Printf("Initial task run failed: %v", err)
+	}
+
+	// Setup daily checks
 	ticker := time.NewTicker(getNextTickDuration(renewalTime))
 	defer ticker.Stop()
-
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	for {
 		select {
 		case <-ticker.C:
-			log.Println("Running scheduled renewal")
-			if err := s.runner.Run(); err != nil {
-				log.Printf("Error during scheduled renewal: %v", err)
+			log.Println("Running scheduled task")
+			if err := s.task(s.ctx); err != nil {
+				log.Printf("Scheduled task failed: %v", err)
 			}
 			ticker.Reset(24 * time.Hour)
-		case <-sigChan:
-			log.Println("Received interrupt signal. Shutting down...")
-			return nil
+		case <-s.ctx.Done():
+			return
 		}
 	}
+}
+
+// Stop gracefully stops the cron service
+func (s *Service) Stop() {
+	s.cancel()
 }
 
 // ParseTime parses a time string in various formats
@@ -82,6 +92,5 @@ func getNextTickDuration(t time.Time) time.Duration {
 	if next.Before(now) {
 		next = next.Add(24 * time.Hour)
 	}
-
 	return next.Sub(now)
 }
