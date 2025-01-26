@@ -12,10 +12,11 @@ import (
 
 	"github.com/spf13/pflag"
 
-	"github.com/yarlson/zero/certificates"
-	"github.com/yarlson/zero/cron"
-	"github.com/yarlson/zero/server"
-	"github.com/yarlson/zero/zerossl"
+	"github.com/yarlson/zero/internal/acme"
+	"github.com/yarlson/zero/internal/cert"
+	"github.com/yarlson/zero/internal/server"
+	"github.com/yarlson/zero/internal/task"
+	"github.com/yarlson/zero/internal/zero"
 )
 
 const (
@@ -54,7 +55,7 @@ func parseFlags() (*Config, error) {
 		return nil, errors.New("domain and email are required")
 	}
 
-	if _, err := cron.ParseTime(cfg.Time); err != nil {
+	if _, err := task.ParseTime(cfg.Time); err != nil {
 		return nil, fmt.Errorf("invalid time format: %w", err)
 	}
 
@@ -72,11 +73,12 @@ func main() {
 	}
 
 	// Setup services
-	zeroSSLService := zerossl.New()
-	certService := certificates.New(zeroSSLService)
+	zeroSSL := acme.NewZeroSSL()
+	store := cert.NewStore()
+	zeroManager := zero.NewManager(zeroSSL, store)
 
 	// Start HTTP server
-	srv := server.New(certService, cfg.Port)
+	srv := server.New(store, cfg.Port)
 	go func() {
 		if err := srv.Start(); err != nil {
 			log.Fatalf("HTTP server error: %v", err)
@@ -85,11 +87,11 @@ func main() {
 
 	// Start certificate checker
 	checkCert := func(ctx context.Context) error {
-		return certService.CheckCertificate(ctx, cfg.Domain, cfg.Email, cfg.CertDir)
+		return zeroManager.CheckCertificate(ctx, cfg.Domain, cfg.Email, cfg.CertDir)
 	}
 
-	cronService := cron.New(checkCert, cfg.Time)
-	go cronService.Start()
+	scheduler := task.NewScheduler(checkCert, cfg.Time)
+	go scheduler.Start()
 
 	// Wait for shutdown signal
 	sigChan := make(chan os.Signal, 1)
@@ -97,6 +99,6 @@ func main() {
 	<-sigChan
 
 	log.Println("Shutting down...")
-	cronService.Stop()
+	scheduler.Stop()
 	time.Sleep(time.Second)
 }

@@ -1,4 +1,4 @@
-# Zero - Go ACME Client for ZeroSSL
+# Zero - SSL Certificate Manager
 
 ## Problem
 
@@ -6,27 +6,114 @@ Nginx servers need SSL/TLS certificates for secure connections. Existing solutio
 
 ## Solution
 
-Zero is a lightweight Go ACME client for obtaining and renewing SSL/TLS certificates from ZeroSSL using the ACME protocol. It runs as a daemon, serving HTTP-01 challenges and automatically managing certificate renewals.
+Zero is a lightweight service that manages SSL/TLS certificates using ZeroSSL. It automatically handles certificate obtainment, renewal, and HTTP challenges while running as a background service.
 
 ## Features
 
-- Obtains and renews SSL/TLS certificates from ZeroSSL
-- Runs as a daemon with automatic daily certificate checks
-- Serves HTTP-01 challenges and redirects HTTP to HTTPS
-- Automatic renewal before expiration (30 days)
+Core Features:
+- Automatic SSL/TLS certificate management via ZeroSSL
+- Daily certificate monitoring and renewal (30 days before expiration)
+- Built-in HTTP server for ACME challenges
+- HTTP to HTTPS traffic redirection
+
+Deployment:
+- Available as a Docker image (AMD64/ARM64)
 - Minimal dependencies
-- Automatic retrieval of ZeroSSL credentials using email
-- Configurable certificate storage directory
-- POSIX-compatible command-line interface
+- Simple command-line interface
+- Configurable certificate storage
+- Configurable renewal schedule
+
+Integration:
+- Works seamlessly with Nginx
+- Easy to use with Docker Compose
+- Automatic ZeroSSL account management
 
 ## Requirements
 
-- Go 1.16 or later
+- Go 1.23 or later
 
 ## Installation
 
+Download the latest release from the [releases page](https://github.com/yarlson/zero/releases/latest).
+
+### macOS
+
+1. Download the appropriate archive for your system architecture:
+
+   - For AMD64 (Intel): `zero_*_darwin_amd64.tar.gz`
+   - For ARM64 (Apple Silicon): `zero_*_darwin_arm64.tar.gz`
+
+2. Extract the binary:
+
+   ```bash
+   tar xzf zero_*.tar.gz
+   ```
+
+3. Make the binary executable and move it to your local bin directory:
+
+   ```bash
+   chmod +x ./zero
+   sudo mv ./zero /usr/local/bin/
+   ```
+
+4. Remove the macOS security quarantine attribute:
+   ```bash
+   sudo xattr -d com.apple.quarantine /usr/local/bin/zero
+   ```
+
+### Linux
+
+1. Download the appropriate archive for your system architecture:
+
+   - For AMD64: `zero_*_linux_amd64.tar.gz`
+   - For ARM64: `zero_*_linux_arm64.tar.gz`
+
+2. Extract the binary:
+
+   ```bash
+   tar xzf zero_*.tar.gz
+   ```
+
+3. Make the binary executable and move it to your local bin directory:
+   ```bash
+   chmod +x ./zero
+   sudo mv ./zero /usr/local/bin/
+   ```
+
+### Windows
+
+1. Download the appropriate archive for your system architecture:
+
+   - For Windows AMD64: `zero_*_windows_amd64.tar.gz`
+   - For Windows ARM64: `zero_*_windows_arm64.tar.gz`
+
+2. Extract the archive using your preferred archive tool
+
+3. Add the extracted binary location to your system's PATH environment variable
+
+### From Source
+
+If you have Go 1.23 or later installed:
+
 ```bash
 go install github.com/yarlson/zero@latest
+```
+
+### Using Docker
+
+Pull and run the latest image:
+
+```bash
+docker pull yarlson/zero:latest
+```
+
+See the [Docker](#docker) section for detailed usage instructions.
+
+### Verify Installation
+
+To verify the installation:
+```bash
+zero --help
 ```
 
 ## Usage
@@ -34,13 +121,13 @@ go install github.com/yarlson/zero@latest
 Basic usage:
 
 ```bash
-sudo zero -d example.com -e user@example.com
+zero -d example.com -e user@example.com
 ```
 
 With all options:
 
 ```bash
-sudo zero -d example.com -e user@example.com [-c /path/to/certs] [-p port] [-t HH:mm]
+zero -d example.com -e user@example.com [-c /path/to/certs] [-p port] [-t HH:mm]
 ```
 
 Options:
@@ -86,3 +173,99 @@ Contributions are welcome. Please submit pull requests with clear descriptions o
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Docker
+
+Zero is available as a Docker image supporting both AMD64 and ARM64 architectures.
+
+Basic usage:
+```bash
+docker run -d \
+  --name zero \
+  -p 80:80 \
+  -v /path/to/certs:/certs \
+  yarlson/zero:latest \
+  -d example.com \
+  -e user@example.com \
+  -c /certs
+```
+
+Options:
+- `-d`: Run container in background
+- `-p 80:80`: Map container's port 80 to host's port 80 (required for ACME challenges)
+- `-v /path/to/certs:/certs`: Mount local directory for certificate storage
+- `yarlson/zero:latest`: Use latest version (or specify a version like `yarlson/zero:0.3.7`)
+
+The certificates will be stored in the mounted volume at `/path/to/certs` on the host.
+
+### Docker Compose
+
+Example docker-compose.yml:
+```yaml
+volumes:
+  certs:  # Named volume for certificates
+
+services:
+  zero:
+    image: yarlson/zero:latest
+    ports:
+      - "80:80"
+    volumes:
+      - certs:/certs
+    command:
+      - -d
+      - example.com
+      - -e
+      - user@example.com
+      - -c
+      - /certs
+    restart: unless-stopped
+```
+
+### Using with Nginx
+
+Example docker-compose.yml with Nginx:
+```yaml
+volumes:
+  certs:  # Named volume for certificates
+
+services:
+  zero:
+    image: yarlson/zero:latest
+    ports:
+      - "80:80"
+    volumes:
+      - certs:/certs
+    command:
+      - -d
+      - example.com
+      - -e
+      - user@example.com
+      - -c
+      - /certs
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "443:443"
+    volumes:
+      - certs:/etc/nginx/certs:ro  # Mount the same volume as read-only
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - zero
+    restart: unless-stopped
+```
+
+Example nginx.conf:
+```nginx
+server {
+    listen 443 ssl;
+    server_name example.com;
+
+    ssl_certificate /etc/nginx/certs/example.com.crt;
+    ssl_certificate_key /etc/nginx/certs/example.com.key;
+
+    # ... rest of your configuration ...
+}
+```

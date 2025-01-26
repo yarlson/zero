@@ -7,25 +7,22 @@ import (
 	"net/http"
 	"path"
 	"strings"
-)
 
-// ChallengeProvider defines the interface for getting HTTP-01 challenge responses
-type ChallengeProvider interface {
-	GetChallengeResponse(token string) (string, bool)
-}
+	"github.com/yarlson/zero/internal/cert"
+)
 
 // Server handles HTTP requests for ACME challenges and HTTPS redirects
 type Server struct {
-	provider ChallengeProvider
-	port     int
-	server   *http.Server
+	certStore *cert.Store
+	port      int
+	server    *http.Server
 }
 
 // New creates a new HTTP server
-func New(provider ChallengeProvider, port int) *Server {
+func New(certStore *cert.Store, port int) *Server {
 	return &Server{
-		provider: provider,
-		port:     port,
+		certStore: certStore,
+		port:      port,
 	}
 }
 
@@ -67,7 +64,7 @@ func (s *Server) handleChallenge(w http.ResponseWriter, r *http.Request) {
 	}
 
 	token := path.Base(r.URL.Path)
-	if response, ok := s.provider.GetChallengeResponse(token); ok {
+	if response, ok := s.certStore.GetChallengeResponse(token); ok {
 		w.Header().Set("Content-Type", "text/plain")
 		if _, err := w.Write([]byte(response)); err != nil {
 			log.Printf("Error writing challenge response: %v", err)

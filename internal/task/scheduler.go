@@ -1,4 +1,4 @@
-package cron
+package task
 
 import (
 	"context"
@@ -7,23 +7,18 @@ import (
 	"time"
 )
 
-// Runner defines the interface for the main certificate operation
-type Runner interface {
-	Run() error
-}
-
-// Service handles the scheduling and execution of periodic tasks
-type Service struct {
+// Scheduler handles the scheduling and execution of periodic tasks
+type Scheduler struct {
 	task   func(context.Context) error
 	time   string
 	ctx    context.Context
 	cancel context.CancelFunc
 }
 
-// New creates a new cron Service
-func New(task func(context.Context) error, time string) *Service {
+// NewScheduler creates a new cron Scheduler
+func NewScheduler(task func(context.Context) error, time string) *Scheduler {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Service{
+	return &Scheduler{
 		task:   task,
 		time:   time,
 		ctx:    ctx,
@@ -32,7 +27,7 @@ func New(task func(context.Context) error, time string) *Service {
 }
 
 // Start begins the cron service
-func (s *Service) Start() {
+func (s *Scheduler) Start() {
 	renewalTime, err := ParseTime(s.time)
 	if err != nil {
 		log.Fatalf("Invalid time format: %v", err)
@@ -64,7 +59,7 @@ func (s *Service) Start() {
 }
 
 // Stop gracefully stops the cron service
-func (s *Service) Stop() {
+func (s *Scheduler) Stop() {
 	s.cancel()
 }
 

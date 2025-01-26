@@ -1,4 +1,4 @@
-package zerossl
+package acme
 
 import (
 	"bytes"
@@ -25,31 +25,19 @@ const (
 	zeroSSLURL       = "https://acme.zerossl.com/v2/DV90"
 )
 
-type Service struct {
+type ZeroSSL struct {
 	client *http.Client
 }
 
-type Option func(*Service)
-
-func WithClient(client *http.Client) Option {
-	return func(s *Service) {
-		s.client = client
-	}
-}
-
-func New(options ...Option) *Service {
-	service := &Service{
+func NewZeroSSL() *ZeroSSL {
+	service := &ZeroSSL{
 		client: &http.Client{Timeout: 10 * time.Second},
-	}
-
-	for _, option := range options {
-		option(service)
 	}
 
 	return service
 }
 
-func (s *Service) FetchCredentials(ctx context.Context, email string) (kid, hmacKey string, err error) {
+func (s *ZeroSSL) FetchCredentials(ctx context.Context, email string) (kid, hmacKey string, err error) {
 	data := []byte(fmt.Sprintf("email=%s", email))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, zeroSSLEABAPIURL, bytes.NewBuffer(data))
 	if err != nil {
@@ -87,7 +75,7 @@ func (s *Service) FetchCredentials(ctx context.Context, email string) (kid, hmac
 	return result.EABKID, result.EABHMACKey, nil
 }
 
-func (s *Service) ObtainCertificate(ctx context.Context, domain, email string, challengeHandler func(token, response string)) ([][]byte, crypto.PrivateKey, error) {
+func (s *ZeroSSL) ObtainCertificate(ctx context.Context, domain, email string, challengeHandler func(token, response string)) ([][]byte, crypto.PrivateKey, error) {
 	eabKID, eabHMACKey, err := s.FetchCredentials(ctx, email)
 	if err != nil {
 		return nil, nil, fmt.Errorf("fetch ZeroSSL credentials: %w", err)
