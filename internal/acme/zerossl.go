@@ -29,9 +29,23 @@ type ZeroSSL struct {
 	client *http.Client
 }
 
-func NewZeroSSL() *ZeroSSL {
-	service := &ZeroSSL{
-		client: &http.Client{Timeout: 10 * time.Second},
+type Option func(*ZeroSSL)
+
+func WithClient(client *http.Client) Option {
+	return func(s *ZeroSSL) {
+		s.client = client
+	}
+}
+
+func NewZeroSSL(options ...Option) *ZeroSSL {
+	service := &ZeroSSL{}
+
+	for _, option := range options {
+		option(service)
+	}
+
+	if service.client == nil {
+		service.client = &http.Client{Timeout: 10 * time.Second}
 	}
 
 	return service
