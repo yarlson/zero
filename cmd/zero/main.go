@@ -14,6 +14,7 @@ import (
 
 	"github.com/yarlson/zero/internal/acme"
 	"github.com/yarlson/zero/internal/cert"
+	"github.com/yarlson/zero/internal/hook"
 	"github.com/yarlson/zero/internal/server"
 	"github.com/yarlson/zero/internal/task"
 	"github.com/yarlson/zero/internal/zero"
@@ -26,11 +27,13 @@ const (
 )
 
 type Config struct {
-	Domain  string
-	Email   string
-	CertDir string
-	Time    string
-	Port    int
+	Domain        string
+	Email         string
+	CertDir       string
+	Time          string
+	Port          int
+	Hook          string
+	HookContainer string
 }
 
 func parseFlags() (*Config, error) {
@@ -41,6 +44,8 @@ func parseFlags() (*Config, error) {
 	pflag.StringVarP(&cfg.CertDir, "cert-dir", "c", defaultCertDir, "Directory to store certificates")
 	pflag.StringVarP(&cfg.Time, "time", "t", defaultTime, "Time for daily renewal in HH:mm format")
 	pflag.IntVarP(&cfg.Port, "port", "p", defaultPort, "HTTP port for ACME challenges")
+	pflag.StringVar(&cfg.Hook, "hook", "", "Command to execute after certificate renewal")
+	pflag.StringVar(&cfg.HookContainer, "hook-container", "", "Container name or network alias to execute hook in")
 
 	pflag.Usage = func() {
 		_, _ = fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
@@ -72,10 +77,16 @@ func main() {
 		log.Fatalf("Create cert directory: %v", err)
 	}
 
+	// Create hook if specified
+	var hookInstance *hook.Hook
+	if cfg.Hook != "" {
+		hookInstance = hook.New(cfg.Hook, cfg.HookContainer)
+	}
+
 	// Setup services
 	zeroSSL := acme.NewZeroSSL()
 	store := cert.NewStore()
-	zeroManager := zero.NewManager(zeroSSL, store)
+	zeroManager := zero.NewManager(zeroSSL, store, hookInstance)
 
 	// Start HTTP server
 	srv := server.New(store, cfg.Port)

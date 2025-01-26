@@ -15,6 +15,7 @@ Core Features:
 - Daily certificate monitoring and renewal (30 days before expiration)
 - Built-in HTTP server for ACME challenges
 - HTTP to HTTPS traffic redirection
+- Post-renewal hooks with Docker container support
 
 Deployment:
 - Available as a Docker image (AMD64/ARM64)
@@ -137,6 +138,8 @@ Options:
 - `-c, --cert-dir`: Directory to store certificates (default: "./certs")
 - `-p, --port`: HTTP port for ACME challenges (default: 80)
 - `-t, --time`: Time for daily renewal checks in HH:mm format (default: "02:00")
+- `--hook`: Command to execute after certificate renewal
+- `--hook-container`: Container name or network alias to execute hook in
 
 For more information, run:
 
@@ -152,6 +155,7 @@ Zero operates as a daemon that:
 2. Redirects all other HTTP traffic to HTTPS
 3. Checks certificates daily at the specified time
 4. Automatically obtains or renews certificates when needed
+5. Executes configured hooks after certificate renewal
 5. Handles graceful shutdown on SIGINT/SIGTERM
 
 ## Configuration
@@ -159,6 +163,27 @@ Zero operates as a daemon that:
 Certificates are stored in the `./certs` directory by default. Use the `--cert-dir` flag to specify a custom directory for certificate storage.
 
 The daemon will check certificates daily at 02:00 by default. Use the `--time` flag to specify a different time in 24-hour format.
+
+### Post-Renewal Hooks
+
+You can configure commands to be executed after certificate renewal using hooks:
+
+```bash
+# Execute local command after renewal
+zero -d example.com -e user@example.com --hook "systemctl reload nginx"
+
+# Execute command in Docker container after renewal
+zero -d example.com -e user@example.com \
+  --hook "nginx -s reload" \
+  --hook-container "nginx-container"
+```
+
+When using `--hook-container`, Zero will:
+1. Find the container by name or network alias
+2. Execute the specified command inside that container
+3. Wait for command completion
+
+This is particularly useful for reloading Nginx configuration after certificate renewal.
 
 ## Limitations
 
@@ -243,6 +268,10 @@ services:
       - user@example.com
       - -c
       - /certs
+      - --hook
+      - nginx -s reload
+      - --hook-container
+      - nginx
     restart: unless-stopped
 
   nginx:

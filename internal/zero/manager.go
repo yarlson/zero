@@ -11,6 +11,7 @@ import (
 
 	"github.com/yarlson/zero/internal/acme"
 	"github.com/yarlson/zero/internal/cert"
+	"github.com/yarlson/zero/internal/hook"
 )
 
 const (
@@ -20,12 +21,14 @@ const (
 type Manager struct {
 	zeroSSL *acme.ZeroSSL
 	store   *cert.Store
+	hook    *hook.Hook
 }
 
-func NewManager(zeroSSL *acme.ZeroSSL, store *cert.Store) *Manager {
+func NewManager(zeroSSL *acme.ZeroSSL, store *cert.Store, hook *hook.Hook) *Manager {
 	return &Manager{
 		zeroSSL: zeroSSL,
 		store:   store,
+		hook:    hook,
 	}
 }
 
@@ -44,6 +47,14 @@ func (s *Manager) ObtainOrRenewCertificate(ctx context.Context, domain, email, c
 
 	log.Printf("Certificate saved to: %s", certFile)
 	log.Printf("Private key saved to: %s", keyFile)
+
+	if s.hook != nil {
+		if err := s.hook.Execute(); err != nil {
+			return fmt.Errorf("execute hook: %w", err)
+		}
+		log.Printf("Hook executed successfully")
+	}
+
 	return nil
 }
 
