@@ -19,7 +19,12 @@ func TestStore(t *testing.T) {
 	t.Run("certificate operations", func(t *testing.T) {
 		store := NewStore()
 		tmpFile := "test_cert.pem"
-		defer os.Remove(tmpFile)
+		defer func() {
+			err := os.Remove(tmpFile)
+			if err != nil && !os.IsNotExist(err) {
+				t.Logf("Failed to remove test certificate file: %v", err)
+			}
+		}()
 
 		// Create a self-signed test certificate
 		template := &x509.Certificate{
@@ -49,7 +54,12 @@ func TestStore(t *testing.T) {
 	t.Run("private key operations", func(t *testing.T) {
 		store := NewStore()
 		tmpFile := "test_key.pem"
-		defer os.Remove(tmpFile)
+		defer func() {
+			err := os.Remove(tmpFile)
+			if err != nil && !os.IsNotExist(err) {
+				t.Logf("Failed to remove test key file: %v", err)
+			}
+		}()
 
 		// Generate and save private key
 		priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

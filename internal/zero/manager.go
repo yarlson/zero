@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/yarlson/zero/internal/acme"
@@ -32,8 +33,8 @@ func NewManager(zeroSSL *acme.ZeroSSL, store *cert.Store, hook *hook.Hook) *Mana
 	}
 }
 
-func (s *Manager) ObtainOrRenewCertificate(ctx context.Context, domain, email, certFile, keyFile string) error {
-	certs, privateKey, err := s.zeroSSL.ObtainCertificate(ctx, domain, email, s.store.StoreChallenge)
+func (s *Manager) ObtainOrRenewCertificate(ctx context.Context, domains []string, email, certFile, keyFile string) error {
+	certs, privateKey, err := s.zeroSSL.ObtainCertificate(ctx, domains, email, s.store.StoreChallenge)
 	if err != nil {
 		return fmt.Errorf("obtain certificate: %w", err)
 	}
@@ -62,9 +63,18 @@ func (s *Manager) CertificateNeedsRenewal(cert *x509.Certificate) bool {
 	return time.Now().Add(renewBeforeDays * 24 * time.Hour).After(cert.NotAfter)
 }
 
-func (s *Manager) CheckCertificate(ctx context.Context, domain, email, certDir string) error {
-	certFile := filepath.Join(certDir, domain+".crt")
-	keyFile := filepath.Join(certDir, domain+".key")
+func (s *Manager) CheckCertificate(ctx context.Context, domains []string, email, certDir string) error {
+	var certFile, keyFile string
+	if len(domains) == 1 {
+		// Single domain case (backward compatibility)
+		certFile = filepath.Join(certDir, domains[0]+".crt")
+		keyFile = filepath.Join(certDir, domains[0]+".key")
+	} else {
+		// Multiple domains case - join domain names with underscore
+		joinedName := strings.Join(domains, "_")
+		certFile = filepath.Join(certDir, joinedName+".crt")
+		keyFile = filepath.Join(certDir, joinedName+".key")
+	}
 
 	certificate, err := s.store.LoadCertificate(certFile)
 	if err != nil {
@@ -72,8 +82,8 @@ func (s *Manager) CheckCertificate(ctx context.Context, domain, email, certDir s
 	}
 
 	if certificate == nil || s.CertificateNeedsRenewal(certificate) {
-		log.Printf("Obtaining certificate for %s", domain)
-		if err := s.ObtainOrRenewCertificate(ctx, domain, email, certFile, keyFile); err != nil {
+		log.Printf("Obtaining certificate for domains: %v", domains)
+		if err := s.ObtainOrRenewCertificate(ctx, domains, email, certFile, keyFile); err != nil {
 			if errors.Is(err, context.Canceled) {
 				return errors.New("operation canceled")
 			}

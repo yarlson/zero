@@ -72,7 +72,11 @@ func TestServer(t *testing.T) {
 
 				resp, err := http.DefaultClient.Do(req)
 				require.NoError(t, err)
-				defer resp.Body.Close()
+				defer func() {
+					if closeErr := resp.Body.Close(); closeErr != nil {
+						t.Logf("Failed to close response body: %v", closeErr)
+					}
+				}()
 
 				assert.Equal(t, tc.expectedCode, resp.StatusCode)
 
@@ -125,7 +129,11 @@ func TestServer(t *testing.T) {
 
 				resp, err := client.Get(tc.requestURL)
 				require.NoError(t, err)
-				defer resp.Body.Close()
+				defer func() {
+					if closeErr := resp.Body.Close(); closeErr != nil {
+						t.Logf("Failed to close response body: %v", closeErr)
+					}
+				}()
 
 				assert.Equal(t, http.StatusMovedPermanently, resp.StatusCode)
 				location := resp.Header.Get("Location")

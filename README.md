@@ -12,6 +12,7 @@ Zero is a lightweight service that manages SSL/TLS certificates using ZeroSSL. I
 
 Core Features:
 - Automatic SSL/TLS certificate management via ZeroSSL
+- Support for multiple domains in a single certificate (SAN certificates)
 - Daily certificate monitoring and renewal (30 days before expiration)
 - Built-in HTTP server for ACME challenges
 - HTTP to HTTPS traffic redirection
@@ -119,10 +120,22 @@ zero --help
 
 ## Usage
 
-Basic usage:
+Basic usage for a single domain:
 
 ```bash
 zero -d example.com -e user@example.com
+```
+
+With multiple domains:
+
+```bash
+zero -d example.com,www.example.com -e user@example.com
+```
+
+Or by specifying the domain flag multiple times:
+
+```bash
+zero -d example.com -d www.example.com -e user@example.com
 ```
 
 With all options:
@@ -133,7 +146,7 @@ zero -d example.com -e user@example.com [-c /path/to/certs] [-p port] [-t HH:mm]
 
 Options:
 
-- `-d, --domain`: Domain name for the certificate (required)
+- `-d, --domain`: Domain name(s) for the certificate (comma-separated or repeated, at least one required)
 - `-e, --email`: Email address for credential retrieval and account registration (required)
 - `-c, --cert-dir`: Directory to store certificates (default: "./certs")
 - `-p, --port`: HTTP port for ACME challenges (default: 80)
@@ -188,7 +201,6 @@ This is particularly useful for reloading Nginx configuration after certificate 
 ## Limitations
 
 - Only supports HTTP-01 challenge
-- Designed for single-domain certificates
 - No support for wildcard certificates
 
 ## Contributing

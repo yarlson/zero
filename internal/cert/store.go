@@ -25,7 +25,11 @@ func (s *Store) SaveCertificate(filename string, certBytes [][]byte) error {
 	if err != nil {
 		return fmt.Errorf("create certificate file: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("close certificate file: %w", closeErr)
+		}
+	}()
 
 	for _, cert := range certBytes {
 		if err := pem.Encode(file, &pem.Block{Type: "CERTIFICATE", Bytes: cert}); err != nil {
@@ -40,7 +44,11 @@ func (s *Store) SavePrivateKey(filename string, privateKey crypto.PrivateKey) er
 	if err != nil {
 		return fmt.Errorf("create private key file: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("close private key file: %w", closeErr)
+		}
+	}()
 
 	privateKeyBytes, err := x509.MarshalPKCS8PrivateKey(privateKey)
 	if err != nil {

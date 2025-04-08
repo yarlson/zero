@@ -27,7 +27,7 @@ const (
 )
 
 type Config struct {
-	Domain        string
+	Domains       []string
 	Email         string
 	CertDir       string
 	Time          string
@@ -39,7 +39,7 @@ type Config struct {
 func parseFlags() (*Config, error) {
 	cfg := &Config{}
 
-	pflag.StringVarP(&cfg.Domain, "domain", "d", "", "Domain name for the certificate")
+	pflag.StringSliceVarP(&cfg.Domains, "domain", "d", []string{}, "Domain name(s) for the certificate (comma-separated or repeated)")
 	pflag.StringVarP(&cfg.Email, "email", "e", "", "Email address for account registration")
 	pflag.StringVarP(&cfg.CertDir, "cert-dir", "c", defaultCertDir, "Directory to store certificates")
 	pflag.StringVarP(&cfg.Time, "time", "t", defaultTime, "Time for daily renewal in HH:mm format")
@@ -49,15 +49,15 @@ func parseFlags() (*Config, error) {
 
 	pflag.Usage = func() {
 		_, _ = fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
-		_, _ = fmt.Fprintf(os.Stderr, "  %s -d example.com -e user@example.com [-c /path/to/certs] [--time HH:mm] [-p port]\n\n", os.Args[0])
+		_, _ = fmt.Fprintf(os.Stderr, "  %s -d example.com,www.example.com -e user@example.com [-c /path/to/certs] [--time HH:mm] [-p port]\n\n", os.Args[0])
 		_, _ = fmt.Fprintf(os.Stderr, "Options:\n")
 		pflag.PrintDefaults()
 	}
 
 	pflag.Parse()
 
-	if cfg.Domain == "" || cfg.Email == "" {
-		return nil, errors.New("domain and email are required")
+	if len(cfg.Domains) == 0 || cfg.Email == "" {
+		return nil, errors.New("at least one domain and email are required")
 	}
 
 	if _, err := task.ParseTime(cfg.Time); err != nil {
@@ -98,7 +98,7 @@ func main() {
 
 	// Start certificate checker
 	checkCert := func(ctx context.Context) error {
-		return zeroManager.CheckCertificate(ctx, cfg.Domain, cfg.Email, cfg.CertDir)
+		return zeroManager.CheckCertificate(ctx, cfg.Domains, cfg.Email, cfg.CertDir)
 	}
 
 	scheduler := task.NewScheduler(checkCert, cfg.Time)

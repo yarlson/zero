@@ -63,7 +63,11 @@ func (s *ZeroSSL) FetchCredentials(ctx context.Context, email string) (kid, hmac
 	if err != nil {
 		return "", "", fmt.Errorf("fetch EAB credentials: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("close response body: %w", closeErr)
+		}
+	}()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -89,7 +93,7 @@ func (s *ZeroSSL) FetchCredentials(ctx context.Context, email string) (kid, hmac
 	return result.EABKID, result.EABHMACKey, nil
 }
 
-func (s *ZeroSSL) ObtainCertificate(ctx context.Context, domain, email string, challengeHandler func(token, response string)) ([][]byte, crypto.PrivateKey, error) {
+func (s *ZeroSSL) ObtainCertificate(ctx context.Context, domains []string, email string, challengeHandler func(token, response string)) ([][]byte, crypto.PrivateKey, error) {
 	eabKID, eabHMACKey, err := s.FetchCredentials(ctx, email)
 	if err != nil {
 		return nil, nil, fmt.Errorf("fetch ZeroSSL credentials: %w", err)
@@ -127,44 +131,45 @@ func (s *ZeroSSL) ObtainCertificate(ctx context.Context, domain, email string, c
 		return nil, nil, fmt.Errorf("generate certificate private key: %w", err)
 	}
 
-	order, err := client.AuthorizeOrder(ctx, []acme.AuthzID{{Type: "dns", Value: domain}})
+	var authzIDs []acme.AuthzID
+	for _, d := range domains {
+		authzIDs = append(authzIDs, acme.AuthzID{Type: "dns", Value: d})
+	}
+
+	order, err := client.AuthorizeOrder(ctx, authzIDs)
 	if err != nil {
 		return nil, nil, fmt.Errorf("create order: %w", err)
 	}
 
-	var challenge *acme.Challenge
 	for _, authzURL := range order.AuthzURLs {
 		auth, err := client.GetAuthorization(ctx, authzURL)
 		if err != nil {
 			return nil, nil, fmt.Errorf("get authorization: %w", err)
 		}
+		var challenge *acme.Challenge
 		for _, c := range auth.Challenges {
 			if c.Type == "http-01" {
 				challenge = c
 				break
 			}
 		}
-		if challenge != nil {
-			break
+		if challenge == nil {
+			return nil, nil, fmt.Errorf("no HTTP-01 challenge found")
+		}
+
+		token := challenge.Token
+		keyAuth, err := client.HTTP01ChallengeResponse(challenge.Token)
+		if err != nil {
+			return nil, nil, fmt.Errorf("get key authorization: %w", err)
+		}
+
+		challengeHandler(token, keyAuth)
+
+		log.Printf("Starting HTTP-01 challenge verification for domain authorization")
+		if _, err := client.Accept(ctx, challenge); err != nil {
+			return nil, nil, fmt.Errorf("accept challenge: %w", err)
 		}
 	}
-	if challenge == nil {
-		return nil, nil, fmt.Errorf("no HTTP-01 challenge found")
-	}
-
-	token := challenge.Token
-	keyAuth, err := client.HTTP01ChallengeResponse(challenge.Token)
-	if err != nil {
-		return nil, nil, fmt.Errorf("get key authorization: %w", err)
-	}
-
-	challengeHandler(token, keyAuth)
-
-	log.Printf("Starting HTTP-01 challenge verification...")
-	if _, err := client.Accept(ctx, challenge); err != nil {
-		return nil, nil, fmt.Errorf("accept challenge: %w", err)
-	}
-	log.Printf("Challenge accepted, waiting for verification (timeout: 10 minutes)...")
 
 	log.Printf("Waiting for order verification (timeout: 10 minutes)...")
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, 10*time.Minute)
@@ -177,8 +182,8 @@ func (s *ZeroSSL) ObtainCertificate(ctx context.Context, domain, email string, c
 	log.Printf("Order verified successfully")
 
 	csrTemplate := &x509.CertificateRequest{
-		Subject:  pkix.Name{CommonName: domain},
-		DNSNames: []string{domain},
+		Subject:  pkix.Name{CommonName: domains[0]},
+		DNSNames: domains,
 	}
 	csrDER, err := x509.CreateCertificateRequest(rand.Reader, csrTemplate, certPrivateKey)
 	if err != nil {
