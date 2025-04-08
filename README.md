@@ -11,6 +11,7 @@ Zero is a lightweight service that manages SSL/TLS certificates using ZeroSSL. I
 ## Features
 
 Core Features:
+
 - Automatic SSL/TLS certificate management via ZeroSSL
 - Support for multiple domains in a single certificate (SAN certificates)
 - Daily certificate monitoring and renewal (30 days before expiration)
@@ -19,6 +20,7 @@ Core Features:
 - Post-renewal hooks with Docker container support
 
 Deployment:
+
 - Available as a Docker image (AMD64/ARM64)
 - Minimal dependencies
 - Simple command-line interface
@@ -26,6 +28,7 @@ Deployment:
 - Configurable renewal schedule
 
 Integration:
+
 - Works seamlessly with Nginx
 - Easy to use with Docker Compose
 - Automatic ZeroSSL account management
@@ -114,6 +117,7 @@ See the [Docker](#docker) section for detailed usage instructions.
 ### Verify Installation
 
 To verify the installation:
+
 ```bash
 zero --help
 ```
@@ -169,7 +173,7 @@ Zero operates as a daemon that:
 3. Checks certificates daily at the specified time
 4. Automatically obtains or renews certificates when needed
 5. Executes configured hooks after certificate renewal
-5. Handles graceful shutdown on SIGINT/SIGTERM
+6. Handles graceful shutdown on SIGINT/SIGTERM
 
 ## Configuration
 
@@ -192,30 +196,19 @@ zero -d example.com -e user@example.com \
 ```
 
 When using `--hook-container`, Zero will:
+
 1. Find the container by name or network alias
 2. Execute the specified command inside that container
 3. Wait for command completion
 
 This is particularly useful for reloading Nginx configuration after certificate renewal.
 
-## Limitations
-
-- Only supports HTTP-01 challenge
-- No support for wildcard certificates
-
-## Contributing
-
-Contributions are welcome. Please submit pull requests with clear descriptions of changes and updates to tests if applicable.
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
 ## Docker
 
 Zero is available as a Docker image supporting both AMD64 and ARM64 architectures.
 
 Basic usage:
+
 ```bash
 docker run -d \
   --name zero \
@@ -228,6 +221,7 @@ docker run -d \
 ```
 
 Options:
+
 - `-d`: Run container in background
 - `-p 80:80`: Map container's port 80 to host's port 80 (required for ACME challenges)
 - `-v /path/to/certs:/certs`: Mount local directory for certificate storage
@@ -238,9 +232,10 @@ The certificates will be stored in the mounted volume at `/path/to/certs` on the
 ### Docker Compose
 
 Example docker-compose.yml:
+
 ```yaml
 volumes:
-  certs:  # Named volume for certificates
+  certs: # Named volume for certificates
 
 services:
   zero:
@@ -262,9 +257,10 @@ services:
 ### Using with Nginx
 
 Example docker-compose.yml with Nginx:
+
 ```yaml
 volumes:
-  certs:  # Named volume for certificates
+  certs: # Named volume for certificates
 
 services:
   zero:
@@ -291,7 +287,7 @@ services:
     ports:
       - "443:443"
     volumes:
-      - certs:/etc/nginx/certs:ro  # Mount the same volume as read-only
+      - certs:/etc/nginx/certs:ro # Mount the same volume as read-only
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - zero
@@ -299,6 +295,7 @@ services:
 ```
 
 Example nginx.conf:
+
 ```nginx
 server {
     listen 443 ssl;
@@ -310,3 +307,16 @@ server {
     # ... rest of your configuration ...
 }
 ```
+
+## Limitations
+
+- Only supports HTTP-01 challenge
+- No support for wildcard certificates
+
+## Contributing
+
+Contributions are welcome. Please submit pull requests with clear descriptions of changes and updates to tests if applicable.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
