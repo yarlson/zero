@@ -39,7 +39,7 @@ jobs:
           args: --timeout 5m
 
       - name: Run build
-        run: go build
+        run: go build cmd/zero/main.go
 
   security:
     name: CodeQL Analysis
