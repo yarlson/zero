@@ -1,11 +1,11 @@
 module github.com/yarlson/zero
 
-go 1.24.1
+go 1.25.0
 
 require (
 	github.com/spf13/pflag v1.0.6
 	github.com/stretchr/testify v1.10.0
-	golang.org/x/crypto v0.45.0
+	golang.org/x/crypto v0.52.0
 )
 
 require (
